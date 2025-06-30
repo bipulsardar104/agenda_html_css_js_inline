@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Today's Agenda</title>
+  </head>
+  <body>
+    <div id="container">
+      <h1>Today's Agenda</h1>
+      <div id="date-section">
+        <label for="agenda-date">Date:</label>
+        <input type="date" id="agenda-date" readonly />
+      </div>
+      <div id="agenda-form">
+        <div class="agenda-item">
+          <input type="text" placeholder="Enter agenda" class="agenda-text" />
+          <input type="time" class="start-time" />
+          <input type="time" class="end-time" />
+        </div>
+      </div>
+      <button id="add-more">Add More</button>
+      <button id="save-agendas">Save Agendas</button>
+      <div id="error" style="color: red"></div>
+      <div id="agenda-list"></div>
+    </div>
+
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 20px;
+      }
+      #container {
+        background-color: #f9f9f9;
+        padding: 20px;
+        border-radius: 8px;
+      }
+      h1 {
+        text-align: center;
+        color: #333;
+      }
+      #date-section {
+        margin-bottom: 20px;
+      }
+      #agenda-date {
+        padding: 8px;
+        font-size: 16px;
+        background-color: #e0e0e0;
+      }
+      .agenda-item {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .agenda-text,
+      .start-time,
+      .end-time {
+        padding: 8px;
+        font-size: 16px;
+        flex: 1;
+      }
+      .remove-btn,
+      #add-more,
+      #save-agendas {
+        padding: 8px 16px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .remove-btn:hover,
+      #add-more:hover,
+      #save-agendas:hover {
+        background-color: #0056b3;
+      }
+      #agenda-list {
+        margin-top: 20px;
+      }
+      .agenda-display {
+        background-color: #fff;
+        padding: 10px;
+        margin-bottom: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .extend-btn {
+        padding: 5px 10px;
+        background-color: #28a745;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .extend-btn:hover {
+        background-color: #218838;
+      }
+    </style>
+
+    <script>
+      // Initialize IndexedDB
+      let db;
+      const request = indexedDB.open("AgendaDB", 1);
+
+      request.onupgradeneeded = function (event) {
+        db = event.target.result;
+        db.createObjectStore("agendas", { keyPath: "id", autoIncrement: true });
+      };
+
+      request.onsuccess = function (event) {
+        db = event.target.result;
+        loadAgendas();
+      };
+
+      request.onerror = function (event) {
+        console.error("IndexedDB error:", event.target.errorCode);
+      };
+
+      // Request notification permission
+      if (
+        Notification.permission !== "granted" &&
+        Notification.permission !== "denied"
+      ) {
+        Notification.requestPermission().then((permission) => {
+          if (permission !== "granted") {
+            alert(
+              "Notifications are disabled. Some features may not work as expected."
+            );
+          }
+        });
+      }
+
+      // Set current date
+      const dateInput = document.getElementById("agenda-date");
+      const today = new Date().toISOString().split("T")[0];
+      dateInput.value = today;
+
+      // Add more agenda
+      document
+        .getElementById("add-more")
+        .addEventListener("click", function () {
+          const agendaForm = document.getElementById("agenda-form");
+          const newItem = document.createElement("div");
+          newItem.className = "agenda-item";
+          newItem.innerHTML = `
+                <input type="text" placeholder="Enter agenda" class="agenda-text">
+                <input type="time" class="start-time">
+                <input type="time" class="end-time">
+                <button class="remove-btn">Remove</button>
+            `;
+          agendaForm.appendChild(newItem);
+          newItem
+            .querySelector(".remove-btn")
+            .addEventListener("click", function () {
+              if (document.querySelectorAll(".agenda-item").length > 1) {
+                newItem.remove();
+              }
+            });
+        });
+
+      // Save agendas
+      document
+        .getElementById("save-agendas")
+        .addEventListener("click", saveAgenda);
+
+      function saveAgenda() {
+        const agendaItems = document.querySelectorAll(".agenda-item");
+        const errorDiv = document.getElementById("error");
+        errorDiv.textContent = "";
+
+        const agendas = [];
+        const agendaTexts = new Set();
+
+        for (let item of agendaItems) {
+          const text = item.querySelector(".agenda-text").value.trim();
+          const startTime = item.querySelector(".start-time").value;
+          const endTime = item.querySelector(".end-time").value;
+
+          // Validations
+          if (!text || !startTime || !endTime) {
+            errorDiv.textContent = "All fields are required.";
+            return;
+          }
+          if (agendaTexts.has(text)) {
+            errorDiv.textContent = "Agenda texts must be unique.";
+            return;
+          }
+          agendaTexts.add(text);
+
+          const start = new Date(`${today}T${startTime}`);
+          const end = new Date(`${today}T${endTime}`);
+
+          if (start >= end) {
+            errorDiv.textContent = "End time must be after start time.";
+            return;
+          }
+
+          for (let agenda of agendas) {
+            const existingStart = new Date(`${today}T${agenda.startTime}`);
+            const existingEnd = new Date(`${today}T${agenda.endTime}`);
+            if (start < existingEnd && end > existingStart) {
+              errorDiv.textContent = "Agendas cannot overlap.";
+              return;
+            }
+          }
+
+          agendas.push({ text, startTime, endTime });
+        }
+
+        const transaction = db.transaction(["agendas"], "readwrite");
+        const store = transaction.objectStore("agendas");
+        store.clear();
+
+        agendas.forEach((agenda) => {
+          store.add(agenda);
+        });
+
+        transaction.oncomplete = function () {
+          loadAgendas();
+          startAgendaMonitoring(agendas);
+        };
+      }
+
+      // Load and display agendas
+      function loadAgendas() {
+        const transaction = db.transaction(["agendas"], "readonly");
+        const store = transaction.objectStore("agendas");
+        const request = store.getAll();
+
+        request.onsuccess = function (event) {
+          const agendas = event.target.result;
+          const agendaList = document.getElementById("agenda-list");
+          agendaList.innerHTML = "";
+
+          agendas.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+          agendas.forEach((agenda) => {
+            const div = document.createElement("div");
+            div.className = "agenda-display";
+            div.innerHTML = `
+                <span>${agenda.text}: ${agenda.startTime} - ${agenda.endTime}</span>
+                <div>
+                    <button class="extend-btn" data-id="${agenda.id}">Extend Time</button>
+                    <button class="delete-btn" data-id="${agenda.id}">Delete</button>
+                </div>
+            `;
+            agendaList.appendChild(div);
+          });
+
+          // Add event listeners for extend and delete buttons
+          document.querySelectorAll(".extend-btn").forEach((btn) => {
+            btn.addEventListener("click", function () {
+              const id = parseInt(this.dataset.id);
+              extendAgendaTime(id);
+            });
+          });
+
+          document.querySelectorAll(".delete-btn").forEach((btn) => {
+            btn.addEventListener("click", function () {
+              const id = parseInt(this.dataset.id);
+              removeAgenda(id);
+            });
+          });
+
+          // Start monitoring agendas for time completion
+          startAgendaMonitoring(agendas);
+        };
+
+        request.onerror = function (event) {
+          console.error("Error loading agendas:", event.target.errorCode);
+          document.getElementById("error").textContent =
+            "Failed to load agendas.";
+        };
+      }
+      function removeAgenda(id) {
+        const transaction = db.transaction(["agendas"], "readwrite");
+        const store = transaction.objectStore("agendas");
+
+        // Delete the agenda with the specified ID
+        const deleteRequest = store.delete(id);
+
+        deleteRequest.onsuccess = function () {
+          // Reload agendas to update the display
+          loadAgendas();
+        };
+
+        deleteRequest.onerror = function (event) {
+          console.error("Error removing agenda:", event.target.errorCode);
+          document.getElementById("error").textContent =
+            "Failed to remove agenda.";
+        };
+      }
+      // Monitor agendas for time completion
+      function startAgendaMonitoring(agendas) {
+        agendas.forEach((agenda) => (agenda.notified = false));
+        setInterval(() => {
+          const now = new Date();
+          agendas.forEach((agenda) => {
+            const end = new Date(`${today}T${agenda.endTime}`);
+            if (now >= end && !agenda.notified) {
+              if (Notification.permission === "granted") {
+                new Notification(`Agenda "${agenda.text}" time is over!`, {
+                  body: 'Click "Extend Time" to add more time.',
+                });
+              } else {
+                alert(`Agenda "${agenda.text}" time is over!`);
+              }
+              agenda.notified = true;
+            }
+          });
+        }, 60000);
+      }
+
+      // Extend agenda time
+      function extendAgendaTime(id) {
+        const minutesToAdd =
+          parseInt(prompt("Enter minutes to extend:", "15")) || 15;
+        const transaction = db.transaction(["agendas"], "readwrite");
+        const store = transaction.objectStore("agendas");
+        const request = store.getAll();
+
+        request.onsuccess = function (event) {
+          const agendas = event.target.result;
+          const targetAgenda = agendas.find((a) => a.id === id);
+          if (!targetAgenda) return;
+
+          const oldEnd = new Date(`${today}T${targetAgenda.endTime}`);
+          const newEnd = new Date(oldEnd.getTime() + minutesToAdd * 60000);
+          targetAgenda.endTime = newEnd.toTimeString().slice(0, 5);
+          targetAgenda.notified = false;
+
+          agendas.sort((a, b) => a.startTime.localeCompare(b.startTime));
+          const targetIndex = agendas.findIndex((a) => a.id === id);
+          let prevEnd = newEnd;
+
+          for (let i = targetIndex + 1; i < agendas.length; i++) {
+            const currentStart = new Date(`${today}T${agendas[i].startTime}`);
+            if (currentStart <= prevEnd) {
+              const duration =
+                new Date(`${today}T${agendas[i].endTime}`).getTime() -
+                currentStart.getTime();
+              agendas[i].startTime = prevEnd.toTimeString().slice(0, 5);
+              const newEnd = new Date(prevEnd.getTime() + duration);
+              agendas[i].endTime = newEnd.toTimeString().slice(0, 5);
+              prevEnd = newEnd;
+            } else {
+              break;
+            }
+          }
+
+          store.clear();
+          agendas.forEach((agenda) => store.add(agenda));
+          transaction.oncomplete = function () {
+            loadAgendas();
+            startAgendaMonitoring(agendas);
+          };
+        };
+      }
+    </script>
+  </body>
+</html>
